@@ -11,7 +11,7 @@ from pathlib import Path
 
 from dataset import BilingualDataset, causal_mask
 from model import build_transformer
-from config import get_weights_file_path, get_config
+from config import get_weights_file_path, get_config, latest_weights_file_path
 
 # Huggingface datasets and tokenizers
 from datasets import load_dataset
