@@ -3,9 +3,9 @@ from pathlib import Path
 def get_config():
     return {
         "batch_size": 8,
-        "num_epochs": 20,
+        "num_epochs": 5,
         "lr": 10**-4,
-        "seq_len": 350,
+        "seq_len": 512,
         "d_model": 512,
         "datasource": 'opus_books',
         "lang_src": "en",

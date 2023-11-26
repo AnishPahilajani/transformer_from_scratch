@@ -1,13 +1,14 @@
 import torch
 import torch.nn as nn
 import math
+import torch.nn.functional as F
 
 class InputEmbeddings(nn.Module):
     def __init__(self, d_model: int, vocab_size: int) -> None:
         super().__init__()
         self.d_model = d_model
         self.vocab_size = vocab_size
-        self.embedding = nn.Embedding(vocab_size, 1)# A simple lookup table that stores embeddings of a fixed dictionary and size.
+        self.embedding = nn.Embedding(vocab_size, d_model)# A simple lookup table that stores embeddings of a fixed dictionary and size.
         
     def forward(self, x):
         return self.embedding(x)/math.sqrt(self.d_model)
@@ -176,13 +177,18 @@ class Decoder(nn.Module):
         return self.norm(x)
 
 class ProjectionLayer(nn.Module):
-    def __init__(self, d_model: int, vocab_size: int) -> None:
+    def __init__(self, d_model: int, seq_len: int, vocab_size: int) -> None:
         super().__init__()
-        self.proj = nn.Linear(d_model, vocab_size)
+        # self.proj = nn.Linear(d_model, vocab_size)
+        self.proj = nn.Linear(d_model*seq_len, 1) #TODO use CNN for projection instead of flattening
     
     def forward(self, x):
         # (batch, seq_len, d_model) -> (batch, seq_len, vocab_size)
-        return torch.log_softmax(self.proj(x), dim = -1)
+        # return torch.log_softmax(self.proj(x), dim = -1)
+        # Also somehow try and maybe hide tha padding. 
+        # (batch, seq_len, d_model) I deally run CNN on this but for now FLATTEN to (batch, seq_len*d_model)
+        x = x.view(x.shape[0], -1)
+        return self.proj(x)
 
 class Transformer(nn.Module):
     # src_pos = tgt_pos
@@ -243,7 +249,7 @@ def build_transformer(src_vocab_size: int, tgt_vocab_size: int, src_seq_len: int
     decoder = Decoder(d_model, nn.ModuleList(decoder_blocks))
     
     # Create the projection layer
-    projection_layer = ProjectionLayer(d_model, tgt_vocab_size)
+    projection_layer = ProjectionLayer(d_model, tgt_seq_len, tgt_vocab_size)
     
     # Create the transformer
     transformer = Transformer(encoder, decoder, src_embed, tgt_embed, src_pos, tgt_pos, projection_layer)

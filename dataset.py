@@ -1,6 +1,9 @@
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset
+from config import get_config
+
+config = get_config()
 
 class BilingualDataset(Dataset):
 
@@ -23,8 +26,9 @@ class BilingualDataset(Dataset):
 
     def __getitem__(self, idx):
         src_target_pair = self.ds[idx]
-        src_text = src_target_pair['translation'][self.src_lang]
-        tgt_text = src_target_pair['translation'][self.tgt_lang]
+        src_text = src_target_pair['question']
+        tgt_text = src_target_pair['answer']
+        tgt_label = src_target_pair['label']
 
         # Transform the text into tokens
         enc_input_tokens = self.tokenizer_src.encode(src_text).ids
@@ -61,26 +65,19 @@ class BilingualDataset(Dataset):
         )
 
         # Add only </s> token (what we expect as output from the decoder)
-        label = torch.cat(
-            [
-                torch.tensor(dec_input_tokens, dtype=torch.int64),
-                self.eos_token,
-                torch.tensor([self.pad_token] * dec_num_padding_tokens, dtype=torch.int64),
-            ],
-            dim=0,
-        )
+        label = torch.Tensor([tgt_label])
 
         # Double check the size of the tensors to make sure they are all seq_len long
         assert encoder_input.size(0) == self.seq_len
         assert decoder_input.size(0) == self.seq_len
-        assert label.size(0) == self.seq_len
+        assert label.size(0) == 1#config['batch_size']
 
         return {
             "encoder_input": encoder_input,  # (seq_len)
             "decoder_input": decoder_input,  # (seq_len)
             "encoder_mask": (encoder_input != self.pad_token).unsqueeze(0).unsqueeze(0).int(), # (1, 1, seq_len)
             "decoder_mask": (decoder_input != self.pad_token).unsqueeze(0).int() & causal_mask(decoder_input.size(0)), # (1, seq_len) & (1, seq_len, seq_len),
-            "label": label,  # (seq_len)
+            "label": label,  # (1)
             "src_text": src_text,
             "tgt_text": tgt_text,
         }
