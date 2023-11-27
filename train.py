@@ -28,7 +28,7 @@ import pandas as pd
 torch.manual_seed(69)
 #train_csv = "./transformer_from_scratch/train.csv"
 train_csv = "./train.csv"
-
+dev_csv = "./dev.csv"
 def greedy_decode(model, source, source_mask, tokenizer_src, tokenizer_tgt, max_len, device):
     sos_idx = tokenizer_tgt.token_to_id('[SOS]')
     eos_idx = tokenizer_tgt.token_to_id('[EOS]')
@@ -67,6 +67,7 @@ def run_validation(model, validation_ds, tokenizer_src, tokenizer_tgt, max_len, 
     source_texts = []
     expected = []
     predicted = []
+    ground_label = []
 
     try:
         # get the console window width
@@ -79,53 +80,136 @@ def run_validation(model, validation_ds, tokenizer_src, tokenizer_tgt, max_len, 
 
     with torch.no_grad():
         for batch in validation_ds:
+            #print("val batch", batch)
             count += 1
-            encoder_input = batch["encoder_input"].to(device) # (b, seq_len)
-            encoder_mask = batch["encoder_mask"].to(device) # (b, 1, 1, seq_len)
+            # encoder_input = batch["encoder_input"].to(device) # (b, seq_len)
+            # encoder_mask = batch["encoder_mask"].to(device) # (b, 1, 1, seq_len)
+            
+            encoder_input = batch['encoder_input'].to(device) # (batch, seq_len)
+            decoder_input = batch['decoder_input'].to(device) # (Batch, seq_len)
+            encoder_mask = batch['encoder_mask'].to(device) # (batch, 1, 1, seq_len) hide only [PAD] tokens
+            decoder_mask = batch['decoder_mask'].to(device) # (Batch, 1, seq_len, seq_len) hide [PAD] and subsequent tokens
+
+            # Run the tensors through the encoder, decoder and the projection layer
+            encoder_output = model.encode(encoder_input, encoder_mask) # (B, seq_len, d_model)
+            decoder_output = model.decode(encoder_output, encoder_mask, decoder_input, decoder_mask) # (B, seq_len, d_model)
+            proj_output = model.project(decoder_output) # (B, seq_len, vocab_size)
+            
+            threshold = 0.5
+            binary_outputs = torch.where(proj_output < threshold, torch.zeros_like(proj_output), torch.ones_like(proj_output))
             
             # check that the batch size is 1
             assert encoder_input.size(0) == 1, "Batch size must be 1 for validation"
             
-            model_out = greedy_decode(model, encoder_input, encoder_mask, tokenizer_src, tokenizer_tgt, max_len, device)
+            #model_out = greedy_decode(model, encoder_input, encoder_mask, tokenizer_src, tokenizer_tgt, max_len, device)
 
             source_text = batch["src_text"][0]
             target_text = batch["tgt_text"][0]
-            model_out_text = tokenizer_tgt.decode(model_out.detach().cpu().numpy())
+            ground_truth = batch["label"].item()
+            #model_out_text = tokenizer_tgt.decode(model_out.detach().cpu().numpy())
 
             source_texts.append(source_text)
             expected.append(target_text)
-            predicted.append(model_out_text)
+            predicted.append(binary_outputs.item())
+            ground_label.append(ground_truth)
             
             # Print the source, target and model output
             print_msg('-'*console_width)
-            print_msg(f"{f'SOURCE: ':>12}{source_text}")
-            print_msg(f"{f'TARGET: ':>12}{target_text}")
-            print_msg(f"{f'PREDICTED: ':>12}{model_out_text}")
+            print_msg(f"{f'Question: ':>12}{source_text}")
+            print_msg(f"{f'Option: ':>12}{target_text}")
+            print_msg(f"{f'PREDICTED: ':>12}{binary_outputs.item()}")
+            print_msg(f"{f'Ground truth: ':>12}{ground_truth}")
 
             if count == num_examples:
                 print_msg('-'*console_width)
                 break
+    return predicted, ground_label
     # this in tensorboard related ignore for now
-    if writer:
+    # if writer:
         # Evaluate the character error rate
         # Compute the char error rate 
-        metric = torchmetrics.CharErrorRate()
-        cer = metric(predicted, expected)
-        writer.add_scalar('validation cer', cer, global_step)
-        writer.flush()
+        # metric = torchmetrics.CharErrorRate()
+        # cer = metric(predicted, ground_label)
+        # writer.add_scalar('validation cer', cer, global_step)
+        # writer.flush()
 
         # Compute the word error rate
-        metric = torchmetrics.WordErrorRate()
-        wer = metric(predicted, expected)
-        writer.add_scalar('validation wer', wer, global_step)
-        writer.flush()
+        # metric = torchmetrics.WordErrorRate()
+        # wer = metric(predicted, expected)
+        # writer.add_scalar('validation wer', wer, global_step)
+        # writer.flush()
 
         # Compute the BLEU metric
-        metric = torchmetrics.BLEUScore()
-        bleu = metric(predicted, expected)
-        writer.add_scalar('validation BLEU', bleu, global_step)
-        writer.flush()
+        # metric = torchmetrics.BLEUScore()
+        # bleu = metric(predicted, expected)
+        # writer.add_scalar('validation BLEU', bleu, global_step)
+        # writer.flush()
+
+def run_test(model, validation_ds, tokenizer_src, tokenizer_tgt, max_len, device, print_msg, global_step, writer):
+    model.eval()
     
+    count = 0
+    source_texts = []
+    expected = []
+    predicted = []
+    ground_label = []
+
+    try:
+        # get the console window width
+        with os.popen('stty size', 'r') as console:
+            _, console_width = console.read().split()
+            console_width = int(console_width)
+    except:
+        # If we can't get the console width, use 80 as default
+        console_width = 80
+
+    with torch.no_grad():
+        for batch in validation_ds:
+            #print("val batch", batch)
+            count += 1
+            # encoder_input = batch["encoder_input"].to(device) # (b, seq_len)
+            # encoder_mask = batch["encoder_mask"].to(device) # (b, 1, 1, seq_len)
+            
+            encoder_input = batch['encoder_input'].to(device) # (batch, seq_len)
+            decoder_input = batch['decoder_input'].to(device) # (Batch, seq_len)
+            encoder_mask = batch['encoder_mask'].to(device) # (batch, 1, 1, seq_len) hide only [PAD] tokens
+            decoder_mask = batch['decoder_mask'].to(device) # (Batch, 1, seq_len, seq_len) hide [PAD] and subsequent tokens
+
+            # Run the tensors through the encoder, decoder and the projection layer
+            encoder_output = model.encode(encoder_input, encoder_mask) # (B, seq_len, d_model)
+            decoder_output = model.decode(encoder_output, encoder_mask, decoder_input, decoder_mask) # (B, seq_len, d_model)
+            proj_output = model.project(decoder_output) # (B, seq_len, vocab_size)
+            
+            threshold = 0.5
+            binary_outputs = torch.where(proj_output < threshold, torch.zeros_like(proj_output), torch.ones_like(proj_output))
+            
+            # check that the batch size is 1
+            assert encoder_input.size(0) == 1, "Batch size must be 1 for validation"
+            
+            #model_out = greedy_decode(model, encoder_input, encoder_mask, tokenizer_src, tokenizer_tgt, max_len, device)
+
+            source_text = batch["src_text"][0]
+            target_text = batch["tgt_text"][0]
+            ground_truth = batch["label"].item()
+            #model_out_text = tokenizer_tgt.decode(model_out.detach().cpu().numpy())
+
+            source_texts.append(source_text)
+            expected.append(target_text)
+            predicted.append(binary_outputs.item())
+            ground_label.append(ground_truth)
+            
+            # Print the source, target and model output
+            # print_msg('-'*console_width)
+            # print_msg(f"{f'Question: ':>12}{source_text}")
+            # print_msg(f"{f'Option: ':>12}{target_text}")
+            # print_msg(f"{f'PREDICTED: ':>12}{binary_outputs.item()}")
+            # print_msg(f"{f'Ground truth: ':>12}{ground_truth}")
+
+            # if count == num_examples:
+            #     print_msg('-'*console_width)
+            #     break
+    return predicted, ground_label
+
 
 def get_all_sentences(ds):
     for item in ds:
@@ -161,9 +245,12 @@ def get_ds(config):
     # print(ds_raw)
     
     train = pd.read_csv(train_csv)
+    dev = pd.read_csv(dev_csv)
     # Create a Hugging Face Dataset
     train_ds_raw = Dataset.from_pandas(train)
+    val_ds_raw = Dataset.from_pandas(dev)
     print("Train data structure: ", train_ds_raw)
+    print("Dev data structure: ", val_ds_raw)
 
     # Build tokenizers
     tokenizer_src = get_or_build_tokenizer(config, train_ds_raw, config['lang_src'])
@@ -176,7 +263,7 @@ def get_ds(config):
     # train_ds_raw, val_ds_raw = random_split(ds_raw, [train_ds_size, val_ds_size])
 
     train_ds = BilingualDataset(train_ds_raw, tokenizer_src, tokenizer_tgt, config['lang_src'], config['lang_tgt'], config['seq_len'])
-    # val_ds = BilingualDataset(val_ds_raw, tokenizer_src, tokenizer_tgt, config['lang_src'], config['lang_tgt'], config['seq_len'])
+    val_ds = BilingualDataset(val_ds_raw, tokenizer_src, tokenizer_tgt, config['lang_src'], config['lang_tgt'], config['seq_len'])
 
     # Find the maximum length of each sentence in the source and target sentence
     max_len_src = 0
@@ -193,8 +280,8 @@ def get_ds(config):
     
 
     train_dataloader = DataLoader(train_ds, batch_size=config['batch_size'], shuffle=True)
-    # val_dataloader = DataLoader(val_ds, batch_size=1, shuffle=True)
-    val_dataloader = None
+    val_dataloader = DataLoader(val_ds, batch_size=1, shuffle=True)
+    # val_dataloader = None
     return train_dataloader, val_dataloader, tokenizer_src, tokenizer_tgt
 
 def get_model(config, vocab_src_len, vocab_tgt_len):
@@ -263,13 +350,18 @@ def train_model(config):
 
             # Compare the output with the label
             label = batch['label'].to(device) # (Batch, seq_len)
+            
+            
+            threshold = 0.5
+            binary_outputs = torch.where(proj_output < threshold, torch.zeros_like(proj_output), torch.ones_like(proj_output))
+            binary_outputs.requires_grad = True
 
             # print(proj_output.shape)
             # print(batch['label'])
             # Compute the loss using a simple cross entropy
             # (batch, seq_len, tgt_vocab_size) -> (batch * seq_len, tgt_vocab_size)
             # loss = loss_fn(proj_output.view(-1), label.view(-1).float())
-            loss = loss_fn(proj_output, label.float())
+            loss = loss_fn(binary_outputs, label.float())
             batch_iterator.set_postfix({"loss": f"{loss.item():6.3f}"})
 
             # Log the loss
@@ -286,7 +378,7 @@ def train_model(config):
             global_step += 1
 
         # Run validation at the end of every epoch
-        #run_validation(model, val_dataloader, tokenizer_src, tokenizer_tgt, config['seq_len'], device, lambda msg: batch_iterator.write(msg), global_step, writer)
+        run_validation(model, val_dataloader, tokenizer_src, tokenizer_tgt, config['seq_len'], device, lambda msg: batch_iterator.write(msg), global_step, writer)
 
         # Save the model at the end of every epoch
         model_filename = get_weights_file_path(config, f"{epoch:02d}")
@@ -296,7 +388,17 @@ def train_model(config):
             'optimizer_state_dict': optimizer.state_dict(),
             'global_step': global_step
         }, model_filename)
-
+    print("RUNNING ON ALL VAL DATA")
+    pred, gr_lab = run_test(model, val_dataloader, tokenizer_src, tokenizer_tgt, config['seq_len'], device, lambda msg: batch_iterator.write(msg), global_step, writer)
+    
+    t = len(pred)
+    c = 0
+    for i in range(len(pred)):
+        if pred[i] == gr_lab[i]:
+            c+= 1
+    print(f"Validation accurace: {c/t*100}")
+        
+        
 
 if __name__ == '__main__':
     #warnings.filterwarnings("ignore")

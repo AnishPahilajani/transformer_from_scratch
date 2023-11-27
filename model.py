@@ -176,19 +176,47 @@ class Decoder(nn.Module):
             x = layer(x, encoder_output, src_mask, tgt_mask)
         return self.norm(x)
 
+# class ProjectionLayer(nn.Module):
+#     def __init__(self, d_model: int, seq_len: int, vocab_size: int) -> None:
+#         super().__init__()
+#         # self.proj = nn.Linear(d_model, vocab_size)
+#         self.proj = nn.Linear(d_model*seq_len, 1) #TODO use CNN for projection instead of flattening
+    
+#     def forward(self, x):
+#         # (batch, seq_len, d_model) -> (batch, seq_len, vocab_size)
+#         # return torch.log_softmax(self.proj(x), dim = -1)
+#         # Also somehow try and maybe hide tha padding. 
+#         # (batch, seq_len, d_model) I deally run CNN on this but for now FLATTEN to (batch, seq_len*d_model)
+#         x = x.view(x.shape[0], -1)
+#         return self.proj(x)
+
 class ProjectionLayer(nn.Module):
     def __init__(self, d_model: int, seq_len: int, vocab_size: int) -> None:
         super().__init__()
-        # self.proj = nn.Linear(d_model, vocab_size)
-        self.proj = nn.Linear(d_model*seq_len, 1) #TODO use CNN for projection instead of flattening
-    
+        
+        # Two Convolutional Layers
+        self.conv1 = nn.Conv1d(in_channels=d_model, out_channels=5, kernel_size=3)
+        self.conv2 = nn.Conv1d(in_channels=5, out_channels=10, kernel_size=3)
+        
+        # Linear Layer
+        self.linear = nn.Linear(10 * (seq_len - 4), 10)  # Adjust the input size based on your sequence length and kernel sizes
+        
+        # Final Linear Layer
+        self.final_linear = nn.Linear(10, 1)
+
     def forward(self, x):
-        # (batch, seq_len, d_model) -> (batch, seq_len, vocab_size)
-        # return torch.log_softmax(self.proj(x), dim = -1)
-        # Also somehow try and maybe hide tha padding. 
-        # (batch, seq_len, d_model) I deally run CNN on this but for now FLATTEN to (batch, seq_len*d_model)
-        x = x.view(x.shape[0], -1)
-        return self.proj(x)
+        # Apply convolutional layers
+        x = F.relu(self.conv1(x))
+        x = F.relu(self.conv2(x))
+        
+        # Flatten the output before the linear layer
+        x = x.view(x.size(0), -1)
+        
+        # Apply linear layers
+        x = F.relu(self.linear(x))
+        x = self.final_linear(x)
+        
+        return x
 
 class Transformer(nn.Module):
     # src_pos = tgt_pos
